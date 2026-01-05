@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Habit } from './types';
-import MonthlyGrid from './components/MonthlyGrid';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import HabitModal from './components/HabitModal';
-import HabitDetailView from './components/HabitDetailView';
-import Login from './components/Login';
-import AdminPanel from './components/AdminPanel';
-import { getTodayDateString } from './utils';
-import { MOTIVATIONAL_MESSAGES } from './constants';
-import { supabase } from './lib/supabase';
+import { Habit } from './types.ts';
+import MonthlyGrid from './components/MonthlyGrid.tsx';
+import AnalyticsDashboard from './components/AnalyticsDashboard.tsx';
+import HabitModal from './components/HabitModal.tsx';
+import HabitDetailView from './components/HabitDetailView.tsx';
+import Login from './components/Login.tsx';
+import AdminPanel from './components/AdminPanel.tsx';
+import { getTodayDateString } from './utils.ts';
+import { MOTIVATIONAL_MESSAGES } from './constants.ts';
+import { supabase } from './lib/supabase.ts';
 
 const ADMIN_EMAIL = 'ragulzoro1@gmail.com';
 
@@ -18,7 +18,6 @@ const App: React.FC = () => {
   const [profile, setProfile] = useState<{ display_name: string } | null>(null);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<{ message: string; isTableMissing: boolean } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [habitToEdit, setHabitToEdit] = useState<Habit | null>(null);
   const [habitDetail, setHabitDetail] = useState<Habit | null>(null);
@@ -27,7 +26,10 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'tracker' | 'admin'>('tracker');
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
@@ -49,13 +51,8 @@ const App: React.FC = () => {
   const fetchHabits = useCallback(async () => {
     if (!supabase || !session) { setLoading(false); return; }
     try {
-      setFetchError(null);
       const { data, error } = await supabase.from('habits').select('*').order('created_at', { ascending: false });
-      if (error) {
-        const isTableMissing = error.message.includes('schema cache') || error.code === '42P01';
-        setFetchError({ message: error.message, isTableMissing });
-        throw error;
-      }
+      if (error) throw error;
       if (data) {
         const habitData = data.map((item: any) => ({
           id: item.id,
@@ -79,9 +76,9 @@ const App: React.FC = () => {
   }, [session]);
 
   useEffect(() => {
-    if (session) {
+    if (session && supabase) {
       fetchHabits();
-      const channel = supabase!.channel('schema-db-changes').on('postgres_changes', { 
+      const channel = supabase.channel('schema-db-changes').on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'habits', 
@@ -89,7 +86,7 @@ const App: React.FC = () => {
       }, () => {
         fetchHabits();
       }).subscribe();
-      return () => { supabase!.removeChannel(channel); };
+      return () => { supabase.removeChannel(channel); };
     } else {
       setHabits([]);
       setLoading(false);
@@ -136,7 +133,6 @@ const App: React.FC = () => {
       .eq('id', id);
 
     if (error) {
-      console.error("Database sync failed:", error);
       fetchHabits(); 
       return;
     }
@@ -146,7 +142,7 @@ const App: React.FC = () => {
       setMotivationalMessage(msg);
       setTimeout(() => setMotivationalMessage(null), 3000);
     }
-  }, [supabase, session, habits, fetchHabits]);
+  }, [session, habits, fetchHabits]);
 
   const deleteHabit = async (id: string) => {
     if (!window.confirm("Permanently delete this habit?")) return;
