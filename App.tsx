@@ -26,10 +26,8 @@ const App: React.FC = () => {
   
   const lastNotifiedRef = useRef<Record<string, string>>({});
 
-  // Detect if app is already installed/standalone
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
 
-  // Monitor connection status
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -41,12 +39,10 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Handle PWA installation
   useEffect(() => {
     const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      console.log('Bloom: Desktop Install Prompt Ready');
     };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
@@ -56,11 +52,8 @@ const App: React.FC = () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
-      }
+      if (outcome === 'accepted') setDeferredPrompt(null);
     } else {
-      // Fallback for Safari/Desktop browsers that don't support custom prompt
       setShowInstallHelp(!showInstallHelp);
     }
   };
@@ -100,7 +93,7 @@ const App: React.FC = () => {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      setHabits(data.map((item: any) => ({
+      setHabits((data || []).map((item: any) => ({
         id: item.id,
         name: item.name,
         goal: item.goal || '',
@@ -113,7 +106,11 @@ const App: React.FC = () => {
         unit: item.unit,
         dailyLogs: item.daily_logs || {}
       })));
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { 
+      console.error("Fetch habits failed:", e); 
+    } finally { 
+      setLoading(false); 
+    }
   }, [session]);
 
   useEffect(() => {
@@ -152,22 +149,66 @@ const App: React.FC = () => {
 
   const addHabit = async (name: string, goal: string, color: string, reminderTime?: string, reminderDays?: number[], targetValue?: number, unit?: string) => {
     if (!supabase || !session) return;
-    await supabase.from('habits').insert([{ 
-      name, goal, color, user_id: session.user.id, completed_dates: [],
-      reminder_time: reminderTime, reminder_days: reminderDays,
-      target_value: targetValue, unit: unit, daily_logs: {}
-    }]);
-    fetchHabits();
+    
+    // Attempt 1: Full Payload (with all new features)
+    const fullPayload: any = { 
+      name, goal, color, user_id: session.user.id, 
+      completed_dates: [], daily_logs: {} 
+    };
+    if (reminderTime) fullPayload.reminder_time = reminderTime;
+    if (reminderDays) fullPayload.reminder_days = reminderDays;
+    if (targetValue !== undefined) fullPayload.target_value = targetValue;
+    if (unit) fullPayload.unit = unit;
+
+    const { error: fullError } = await supabase.from('habits').insert([fullPayload]);
+    
+    if (fullError) {
+      console.warn("Full insert failed, attempting minimal fallback:", fullError);
+      
+      // Attempt 2: Minimal Fallback (only basic columns likely to exist in older schemas)
+      const minimalPayload = { name, goal, color, user_id: session.user.id, completed_dates: [] };
+      const { error: minimalError } = await supabase.from('habits').insert([minimalPayload]);
+      
+      if (minimalError) {
+        const errorMsg = minimalError.message || JSON.stringify(minimalError);
+        alert(`Failed to save habit. This is usually due to missing columns in your 'habits' table.\n\nError: ${errorMsg}`);
+        return;
+      } else {
+        alert("Habit saved, but advanced features (reminders/measurable goals) were disabled because your database table needs to be updated with the new columns.");
+      }
+    }
+    
+    await fetchHabits();
     setIsModalOpen(false);
   };
 
   const updateHabit = async (id: string, name: string, goal: string, color: string, reminderTime?: string, reminderDays?: number[], targetValue?: number, unit?: string) => {
     if (!supabase || !session) return;
-    await supabase.from('habits').update({ 
-      name, goal, color, reminder_time: reminderTime, reminder_days: reminderDays,
-      target_value: targetValue, unit: unit
-    }).eq('id', id);
-    fetchHabits();
+    
+    const payload: any = { name, goal, color };
+    if (reminderTime !== undefined) payload.reminder_time = reminderTime;
+    if (reminderDays !== undefined) payload.reminder_days = reminderDays;
+    if (targetValue !== undefined) payload.target_value = targetValue;
+    if (unit !== undefined) payload.unit = unit;
+
+    const { error } = await supabase.from('habits').update(payload).eq('id', id);
+    
+    if (error) {
+      // If error mentions missing column, try updating just the basics
+      if (error.message.includes('column') || error.code === '42703') {
+        const minimalUpdate = { name, goal, color };
+        const { error: retryError } = await supabase.from('habits').update(minimalUpdate).eq('id', id);
+        if (retryError) {
+          alert(`Update failed: ${retryError.message}`);
+          return;
+        }
+      } else {
+        alert(`Update failed: ${JSON.stringify(error)}`);
+        return;
+      }
+    }
+
+    await fetchHabits();
     setIsModalOpen(false);
   };
 
@@ -195,7 +236,13 @@ const App: React.FC = () => {
     }
     
     setHabits(prev => prev.map(h => h.id === id ? { ...h, completedDates: newDates, dailyLogs: newLogs } : h));
-    await supabase.from('habits').update({ completed_dates: newDates, daily_logs: newLogs }).eq('id', id);
+    
+    // Only try to update daily_logs if it's not a boolean toggle, to avoid errors on old schemas
+    const updatePayload: any = { completed_dates: newDates };
+    if (measurableValue !== undefined) updatePayload.daily_logs = newLogs;
+
+    const { error } = await supabase.from('habits').update(updatePayload).eq('id', id);
+    if (error) console.error("Toggle update failed:", error);
 
     if (isNowDone && dateStr === getTodayDateString()) {
       setMotivationalMessage(MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)]);
@@ -205,8 +252,12 @@ const App: React.FC = () => {
 
   const deleteHabit = async (id: string) => {
     if (!window.confirm("Remove this ritual?")) return;
+    const { error } = await supabase?.from('habits').delete().eq('id', id) || { error: null };
+    if (error) {
+      alert(`Delete failed: ${JSON.stringify(error)}`);
+      return;
+    }
     setHabits(prev => prev.filter(h => h.id !== id));
-    await supabase?.from('habits').delete().eq('id', id);
     setIsModalOpen(false);
   };
 
@@ -214,7 +265,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen pb-40">
-      {/* Offline Badge */}
       {!isOnline && (
         <div className="fixed top-0 left-0 w-full bg-orange-500 text-white py-1 px-4 text-[10px] font-black uppercase text-center tracking-widest z-[100] animate-in slide-in-from-top duration-300">
           Working Offline • Your data will sync when you're back
@@ -232,7 +282,6 @@ const App: React.FC = () => {
       <div className="max-w-6xl mx-auto px-6 py-12">
         <header className="flex flex-col items-center mb-20 gap-8">
           <div className="flex flex-col items-center text-center w-full">
-            {/* Improved Download/Install Section */}
             {!isStandalone && (
               <div className="relative mb-6">
                 <button 
@@ -242,11 +291,10 @@ const App: React.FC = () => {
                   <span className="text-lg">💻</span>
                   Download Bloom for Desktop
                 </button>
-                
                 {showInstallHelp && (
                   <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-64 p-5 bg-gray-900 text-white text-[10px] font-bold rounded-2xl shadow-2xl z-50 animate-in zoom-in duration-200">
                     <p className="leading-relaxed mb-2 uppercase tracking-widest text-bloom-400">Manual Install:</p>
-                    <p className="opacity-80">If using Safari or Firefox, click the <span className="text-bloom-300 font-black">Share</span> or <span className="text-bloom-300 font-black">Menu</span> icon and select <span className="underline">"Add to Dock"</span> or <span className="underline">"Install App"</span> to use Bloom as a standalone app.</p>
+                    <p className="opacity-80">Use the browser menu and select <span className="underline">"Add to Dock"</span> or <span className="underline">"Install App"</span>.</p>
                   </div>
                 )}
               </div>
