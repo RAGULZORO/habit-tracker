@@ -22,3 +22,12 @@ export type StreakData = {
   longestStreak: number;
   isCompletedToday: boolean;
 };
+
+export interface YearlyReportData {
+  totalCompletions: number;
+  bestStreak: number;
+  perfectWeeks: number;
+  dominantColor: string;
+  daysSincePlanting: number;
+  isEligible: boolean;
+}

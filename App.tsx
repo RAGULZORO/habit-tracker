@@ -15,9 +15,10 @@ const ADMIN_EMAIL = 'ragulzoro1@gmail.com';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
-  const [profile, setProfile] = useState<{ display_name: string } | null>(null);
+  const [profile, setProfile] = useState<{ display_name: string; created_at?: string } | null>(null);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [habitToEdit, setHabitToEdit] = useState<Habit | null>(null);
   const [habitDetail, setHabitDetail] = useState<Habit | null>(null);
@@ -37,7 +38,6 @@ const App: React.FC = () => {
       if (!session) setCurrentView('tracker');
     });
 
-    // Request notification permission
     if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
@@ -48,9 +48,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchProfile = async () => {
       if (!supabase || !session) return;
-      const { data, error } = await supabase.from('profiles').select('display_name').eq('id', session.user.id).single();
-      if (!error && data) setProfile(data);
-      else setProfile({ display_name: session.user.email?.split('@')[0] || 'User' });
+      try {
+        const { data, error } = await supabase.from('profiles').select('display_name, created_at').eq('id', session.user.id).single();
+        if (!error && data) setProfile(data);
+        else setProfile({ display_name: session.user.email?.split('@')[0] || 'User' });
+      } catch (e) {
+        setProfile({ display_name: session.user.email?.split('@')[0] || 'User' });
+      }
     };
     if (session) fetchProfile();
   }, [session]);
@@ -58,7 +62,12 @@ const App: React.FC = () => {
   const fetchHabits = useCallback(async () => {
     if (!supabase || !session) { setLoading(false); return; }
     try {
-      const { data, error } = await supabase.from('habits').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('habits')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
+      
       if (error) throw error;
       if (data) {
         const habitData = data.map((item: any) => ({
@@ -78,13 +87,12 @@ const App: React.FC = () => {
         });
       }
     } catch (e: any) { 
-      console.error("Fetch failed:", e); 
+      console.error("Fetch habits failed:", e); 
     } finally { 
       setLoading(false); 
     }
   }, [session]);
 
-  // Reminder Checker Service
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -101,15 +109,15 @@ const App: React.FC = () => {
           if (isScheduledToday && !alreadyCompleted && !lastReminderTriggered.current[key]) {
             lastReminderTriggered.current[key] = 'sent';
             if ("Notification" in window && Notification.permission === "granted") {
-              new Notification(`Bloom Reminder: ${habit.name}`, {
-                body: `Time for your daily ritual: ${habit.name}. ${habit.goal ? `Goal: ${habit.goal}` : ''}`,
+              new Notification(`Bloom: ${habit.name}`, {
+                body: `Time for your daily ritual: ${habit.name}.`,
                 icon: '/favicon.ico'
               });
             }
           }
         }
       });
-    }, 30000); // Check every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [habits]);
@@ -133,33 +141,73 @@ const App: React.FC = () => {
   }, [fetchHabits, session]);
 
   const addHabit = async (name: string, goal: string, color: string, reminderTime?: string, reminderDays?: number[]) => {
-    if (!supabase || !session) return;
-    const { error } = await supabase.from('habits').insert([{ 
-      name, 
-      goal, 
-      color, 
-      completed_dates: [], 
-      user_id: session.user.id,
-      reminder_time: reminderTime,
-      reminder_days: reminderDays
-    }]);
-    if (error) alert(`Error adding habit: ${error.message}`);
-    else fetchHabits();
+    if (!supabase || !session) {
+        alert("Session lost. Please log in again.");
+        return;
+    }
+    
+    setActionLoading(true);
+    try {
+      const habitData: any = { 
+        name, 
+        goal: goal || '', 
+        color: color || 'bg-bloom-100 text-bloom-700 border-bloom-200', 
+        completed_dates: [], 
+        user_id: session.user.id
+      };
+
+      if (reminderTime) habitData.reminder_time = reminderTime;
+      if (reminderDays && reminderDays.length > 0) habitData.reminder_days = reminderDays;
+
+      const { error } = await supabase.from('habits').insert([habitData]);
+      
+      if (error) {
+          console.error("Supabase Insert Error:", error);
+          alert(`Failed to add habit.\n\nMessage: ${error.message}\nCode: ${error.code}`);
+          throw error;
+      }
+      
+      await fetchHabits();
+      setIsModalOpen(false);
+    } catch (error: any) {
+      console.error("Add habit exception:", error);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const updateHabit = async (id: string, name: string, goal: string, color: string, reminderTime?: string, reminderDays?: number[]) => {
     if (!supabase || !session) return;
-    const { error } = await supabase.from('habits')
-      .update({ 
+    
+    setActionLoading(true);
+    try {
+      const updateData: any = { 
         name, 
-        goal, 
-        color, 
-        reminder_time: reminderTime, 
-        reminder_days: reminderDays 
-      })
-      .eq('id', id);
-    if (error) alert(`Error updating habit: ${error.message}`);
-    else fetchHabits();
+        goal: goal || '', 
+        color: color || 'bg-bloom-100 text-bloom-700 border-bloom-200'
+      };
+
+      if (reminderTime) updateData.reminder_time = reminderTime;
+      else updateData.reminder_time = null;
+      
+      if (reminderDays) updateData.reminder_days = reminderDays;
+      else updateData.reminder_days = null;
+
+      const { error } = await supabase.from('habits')
+        .update(updateData)
+        .eq('id', id);
+        
+      if (error) {
+          alert(`Failed to update habit: ${error.message}`);
+          throw error;
+      }
+      await fetchHabits();
+      setIsModalOpen(false);
+    } catch (error: any) {
+      console.error("Update habit error:", error);
+    } finally {
+        setActionLoading(false);
+    }
   };
 
   const toggleHabit = useCallback(async (id: string, dateStr: string) => {
@@ -180,6 +228,7 @@ const App: React.FC = () => {
       .eq('id', id);
 
     if (error) {
+      console.error("Toggle error:", error);
       fetchHabits(); 
       return;
     }
@@ -212,7 +261,7 @@ const App: React.FC = () => {
     if (!supabase || !session) return;
     if (!habits.length) return;
 
-    const confirmed = window.confirm("🚨 WARNING: This will permanently delete ALL habits and their progress data. This action cannot be undone.");
+    const confirmed = window.confirm("🚨 WARNING: This will permanently delete ALL habits.");
     if (!confirmed) return;
 
     const verification = window.prompt("Type 'CLEAR MY GARDEN' to confirm complete deletion:");
@@ -225,9 +274,6 @@ const App: React.FC = () => {
     setLoading(true);
     try {
       const habitIds = habits.map(h => h.id);
-      
-      // We use the ID list for a more explicit deletion which often works better with RLS policies
-      // than a generic user_id filter if the user's project setup is strict.
       const { error } = await supabase
         .from('habits')
         .delete()
@@ -241,7 +287,6 @@ const App: React.FC = () => {
     } catch (err: any) {
       console.error("Clear failed:", err);
       alert(`Failed to clear habits: ${err.message}`);
-      // Restore on failure
       setHabits(snapshot);
     } finally {
       setLoading(false);
@@ -265,11 +310,11 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="max-w-[1200px] mx-auto px-4 md:px-8 py-8 md:py-16">
-        <header className="flex flex-col items-center gap-8 mb-16 md:mb-24">
+      <div className="max-w-[1200px] mx-auto px-4 md:px-8 py-6 md:py-12">
+        <header className="flex flex-col items-center gap-8 mb-12 md:mb-20">
           <div className="flex flex-col items-center text-center">
             <h1 className="text-5xl md:text-7xl font-black tracking-tighter text-bloom-500 leading-none">Bloom.</h1>
-            <p className="text-gray-400 font-bold text-[10px] md:text-xs uppercase tracking-[0.4em] mt-3">{profile?.display_name || 'Grower'}'s Garden</p>
+            <p className="text-gray-400 font-bold text-[10px] md:text-xs uppercase tracking-[0.4em] mt-3">{profile?.display_name || 'Grower'}'s Space</p>
           </div>
 
           <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
@@ -300,13 +345,13 @@ const App: React.FC = () => {
               <div className="w-14 h-14 border-4 border-bloom-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
           ) : habits.length === 0 ? (
-            <div className="text-center py-32 md:py-48 bg-gray-50/50 rounded-[48px] border-2 border-dashed border-bloom-100 mx-4">
-              <div className="text-7xl mb-8">🌱</div>
-              <h3 className="text-2xl md:text-3xl font-black mb-10 text-gray-900">Start your garden</h3>
-              <button onClick={() => setIsModalOpen(true)} className="px-12 py-6 bg-bloom-500 text-white rounded-[32px] font-black uppercase tracking-widest shadow-2xl shadow-bloom-500/20 transition-transform hover:-translate-y-1 active:scale-95 text-sm">Plant a Habit</button>
+            <div className="text-center py-24 md:py-48 bg-gray-50/50 rounded-[40px] border-2 border-dashed border-bloom-100 mx-4">
+              <div className="text-6xl md:text-7xl mb-8">🌱</div>
+              <h3 className="text-xl md:text-3xl font-black mb-10 text-gray-900 tracking-tight px-4">Cultivate your first habit</h3>
+              <button onClick={() => setIsModalOpen(true)} className="px-10 py-5 bg-bloom-500 text-white rounded-[24px] md:rounded-[32px] font-black uppercase tracking-widest shadow-2xl shadow-bloom-500/20 transition-all hover:-translate-y-1 active:scale-95 text-xs md:text-sm">Plant a Ritual</button>
             </div>
           ) : (
-            <div className="space-y-16 md:space-y-24">
+            <div className="space-y-12 md:space-y-24">
               <MonthlyGrid 
                 habits={habits} 
                 currentDate={currentDate} 
@@ -319,17 +364,24 @@ const App: React.FC = () => {
                 habits={habits} 
                 currentDate={currentDate} 
                 onDeleteAll={deleteAllHabits}
+                profileCreatedAt={profile?.created_at}
               />
             </div>
           )}
         </main>
       </div>
 
-      <button onClick={() => setIsModalOpen(true)} className="fixed bottom-6 right-6 md:bottom-12 md:right-12 w-16 h-16 md:w-24 md:h-24 bg-bloom-500 text-white rounded-[24px] md:rounded-[40px] shadow-[0_20px_50px_rgba(128,185,24,0.3)] flex items-center justify-center hover:scale-110 active:scale-90 transition-all z-50">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 md:h-12 md:w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+      <button onClick={() => setIsModalOpen(true)} className="fixed bottom-6 right-6 md:bottom-12 md:right-12 w-16 h-16 md:w-20 md:h-20 bg-bloom-500 text-white rounded-[20px] md:rounded-[32px] shadow-[0_20px_50px_rgba(128,185,24,0.3)] flex items-center justify-center hover:scale-110 active:scale-90 transition-all z-50">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 md:h-10 md:w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
       </button>
 
-      <HabitModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setHabitToEdit(null); }} onAdd={addHabit} onUpdate={updateHabit} habitToEdit={habitToEdit} />
+      <HabitModal 
+        isOpen={isModalOpen} 
+        onClose={() => { setIsModalOpen(false); setHabitToEdit(null); }} 
+        onAdd={addHabit} 
+        onUpdate={updateHabit} 
+        habitToEdit={habitToEdit} 
+      />
       
       {habitDetail && (
         <HabitDetailView 
