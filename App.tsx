@@ -19,8 +19,25 @@ const App: React.FC = () => {
   const [habitToEdit, setHabitToEdit] = useState<Habit | null>(null);
   const [motivationalMessage, setMotivationalMessage] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   
   const lastNotifiedRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -90,7 +107,7 @@ const App: React.FC = () => {
           if (Notification.permission === 'granted') {
             new Notification('Ritual Reminder', {
               body: `Time for your "${habit.name}" ritual! 🌱`,
-              icon: '/favicon.ico'
+              icon: 'https://cdn-icons-png.flaticon.com/512/1043/1043361.png'
             });
             lastNotifiedRef.current[`${habit.id}-${todayStr}`] = currentHourMin;
           }
@@ -181,7 +198,15 @@ const App: React.FC = () => {
 
       <div className="max-w-6xl mx-auto px-6 py-12">
         <header className="flex flex-col items-center mb-20 gap-8">
-          <div className="text-center">
+          <div className="flex flex-col items-center text-center">
+            {deferredPrompt && (
+              <button 
+                onClick={handleInstallClick}
+                className="mb-6 px-4 py-1.5 bg-bloom-100 text-bloom-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-bloom-200 hover:bg-bloom-500 hover:text-white hover:border-bloom-400 transition-all shadow-sm"
+              >
+                📥 Install App
+              </button>
+            )}
             <h1 className="text-7xl font-black tracking-tighter text-bloom-500">Bloom.</h1>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-400 mt-2">
               {profile?.display_name}'s Ritual Garden
