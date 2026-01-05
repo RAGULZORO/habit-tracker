@@ -6,6 +6,8 @@ export interface Habit {
   color: string;
   completedDates: string[]; // ISO YYYY-MM-DD
   createdAt: string;
+  reminderTime?: string; // HH:mm format
+  reminderDays?: number[]; // [0-6] where 0 is Sunday
 }
 
 export interface DayProgress {
