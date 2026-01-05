@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Habit } from './types.ts';
 import MonthlyGrid from './components/MonthlyGrid.tsx';
@@ -20,9 +21,23 @@ const App: React.FC = () => {
   const [motivationalMessage, setMotivationalMessage] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   const lastNotifiedRef = useRef<Record<string, string>>({});
 
+  // Monitor connection status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Handle PWA installation
   useEffect(() => {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
@@ -188,6 +203,13 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen pb-40">
+      {/* Offline Badge */}
+      {!isOnline && (
+        <div className="fixed top-0 left-0 w-full bg-orange-500 text-white py-1 px-4 text-[10px] font-black uppercase text-center tracking-widest z-[100] animate-in slide-in-from-top duration-300">
+          Working Offline • Your data will sync when you're back
+        </div>
+      )}
+
       {motivationalMessage && (
         <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
           <div className="bg-bloom-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold text-sm">
@@ -202,9 +224,10 @@ const App: React.FC = () => {
             {deferredPrompt && (
               <button 
                 onClick={handleInstallClick}
-                className="mb-6 px-4 py-1.5 bg-bloom-100 text-bloom-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-bloom-200 hover:bg-bloom-500 hover:text-white hover:border-bloom-400 transition-all shadow-sm"
+                className="mb-6 px-5 py-2 bg-white text-bloom-600 text-[10px] font-black uppercase tracking-widest rounded-2xl border-2 border-bloom-100 hover:bg-bloom-500 hover:text-white hover:border-bloom-400 transition-all shadow-md group"
               >
-                📥 Install App
+                <span className="mr-2">📥</span>
+                Download Bloom App
               </button>
             )}
             <h1 className="text-7xl font-black tracking-tighter text-bloom-500">Bloom.</h1>

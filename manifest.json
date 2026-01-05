@@ -1,22 +1,39 @@
+
 {
   "name": "Bloom Habit Tracker",
   "short_name": "Bloom",
-  "description": "Cultivate your daily rhythm and rituals.",
-  "start_url": ".",
+  "description": "Cultivate your daily rhythm and rituals in a minimalist digital garden.",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#fdfdfb",
   "theme_color": "#80b918",
+  "categories": ["productivity", "health", "lifestyle"],
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/1043/1043361.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1043/1043361.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/1043/1043361.png",
       "sizes": "512x512",
       "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add Ritual",
+      "short_name": "Add",
+      "description": "Plant a new habit in your garden",
+      "url": "/?action=add",
+      "icons": [{ "src": "https://cdn-icons-png.flaticon.com/512/1043/1043361.png", "sizes": "192x192" }]
     }
   ]
 }
