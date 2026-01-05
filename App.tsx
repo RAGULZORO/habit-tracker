@@ -221,12 +221,17 @@ const App: React.FC = () => {
       return;
     }
 
+    const snapshot = [...habits];
     setLoading(true);
     try {
+      const habitIds = habits.map(h => h.id);
+      
+      // We use the ID list for a more explicit deletion which often works better with RLS policies
+      // than a generic user_id filter if the user's project setup is strict.
       const { error } = await supabase
         .from('habits')
         .delete()
-        .eq('user_id', session.user.id);
+        .in('id', habitIds);
 
       if (error) throw error;
       
@@ -234,8 +239,10 @@ const App: React.FC = () => {
       setHabitDetail(null);
       alert("Your garden has been completely cleared.");
     } catch (err: any) {
+      console.error("Clear failed:", err);
       alert(`Failed to clear habits: ${err.message}`);
-      fetchHabits();
+      // Restore on failure
+      setHabits(snapshot);
     } finally {
       setLoading(false);
     }
