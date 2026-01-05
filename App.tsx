@@ -22,8 +22,12 @@ const App: React.FC = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   
   const lastNotifiedRef = useRef<Record<string, string>>({});
+
+  // Detect if app is already installed/standalone
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
 
   // Monitor connection status
   useEffect(() => {
@@ -39,18 +43,25 @@ const App: React.FC = () => {
 
   // Handle PWA installation
   useEffect(() => {
-    window.addEventListener('beforeinstallprompt', (e) => {
+    const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-    });
+      console.log('Bloom: Desktop Install Prompt Ready');
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      // Fallback for Safari/Desktop browsers that don't support custom prompt
+      setShowInstallHelp(!showInstallHelp);
     }
   };
 
@@ -122,7 +133,7 @@ const App: React.FC = () => {
           if (Notification.permission === 'granted') {
             new Notification('Ritual Reminder', {
               body: `Time for your "${habit.name}" ritual! 🌱`,
-              icon: 'https://cdn-icons-png.flaticon.com/512/1043/1043361.png'
+              icon: 'https://cdn-icons-png.flaticon.com/512/628/628283.png'
             });
             lastNotifiedRef.current[`${habit.id}-${todayStr}`] = currentHourMin;
           }
@@ -220,16 +231,27 @@ const App: React.FC = () => {
 
       <div className="max-w-6xl mx-auto px-6 py-12">
         <header className="flex flex-col items-center mb-20 gap-8">
-          <div className="flex flex-col items-center text-center">
-            {deferredPrompt && (
-              <button 
-                onClick={handleInstallClick}
-                className="mb-6 px-5 py-2 bg-white text-bloom-600 text-[10px] font-black uppercase tracking-widest rounded-2xl border-2 border-bloom-100 hover:bg-bloom-500 hover:text-white hover:border-bloom-400 transition-all shadow-md group"
-              >
-                <span className="mr-2">📥</span>
-                Download Bloom App
-              </button>
+          <div className="flex flex-col items-center text-center w-full">
+            {/* Improved Download/Install Section */}
+            {!isStandalone && (
+              <div className="relative mb-6">
+                <button 
+                  onClick={handleInstallClick}
+                  className="px-6 py-2.5 bg-white text-bloom-600 text-[11px] font-black uppercase tracking-widest rounded-2xl border-2 border-bloom-100 hover:bg-bloom-500 hover:text-white hover:border-bloom-400 transition-all shadow-md flex items-center gap-2 group"
+                >
+                  <span className="text-lg">💻</span>
+                  Download Bloom for Desktop
+                </button>
+                
+                {showInstallHelp && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-64 p-5 bg-gray-900 text-white text-[10px] font-bold rounded-2xl shadow-2xl z-50 animate-in zoom-in duration-200">
+                    <p className="leading-relaxed mb-2 uppercase tracking-widest text-bloom-400">Manual Install:</p>
+                    <p className="opacity-80">If using Safari or Firefox, click the <span className="text-bloom-300 font-black">Share</span> or <span className="text-bloom-300 font-black">Menu</span> icon and select <span className="underline">"Add to Dock"</span> or <span className="underline">"Install App"</span> to use Bloom as a standalone app.</p>
+                  </div>
+                )}
+              </div>
             )}
+            
             <h1 className="text-7xl font-black tracking-tighter text-bloom-500">Bloom.</h1>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-400 mt-2">
               {profile?.display_name}'s Ritual Garden
