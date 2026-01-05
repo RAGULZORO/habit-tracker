@@ -11,13 +11,13 @@ export const PASTEL_COLORS = [
 ];
 
 export const MOTIVATIONAL_MESSAGES = [
-  "Consistency is key! Keep it up. ✨",
-  "One step at a time. You're doing great! 🌱",
-  "Another day, another victory! 🏆",
+  "Consistency is key! ✨",
+  "One step at a time. 🌱",
+  "Another victory! 🏆",
   "Your future self will thank you. 💖",
-  "Small habits lead to big changes. 🚀",
-  "You're on a roll! Keep that fire burning. 🔥",
-  "Excellence is not an act, but a habit. 💫",
+  "Small habits, big changes. 🚀",
+  "You're on a roll! 🔥",
+  "Excellence is a habit. 💫",
   "Bloom where you are planted. 🌸",
 ];
 

@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Habit } from '../types';
 import { getDaysInMonth, formatDateForGrid, getTodayDateString } from '../utils';
 
@@ -14,105 +13,126 @@ const ProgressGraph: React.FC<ProgressGraphProps> = ({ habits, currentDate }) =>
   const daysCount = getDaysInMonth(year, month);
   const todayStr = getTodayDateString();
 
-  const daysData = Array.from({ length: daysCount }, (_, i) => {
-    const day = i + 1;
-    const dateStr = formatDateForGrid(year, month, day);
-    const completedCount = habits.filter(h => h.completedDates.includes(dateStr)).length;
-    const totalCount = habits.length;
-    const percentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-    
-    // Format a nice date for the tooltip
-    const dateObj = new Date(year, month, day);
-    const formattedDate = dateObj.toLocaleDateString(undefined, { 
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric' 
+  const daysData = useMemo(() => {
+    return Array.from({ length: daysCount }, (_, i) => {
+      const day = i + 1;
+      const dateStr = formatDateForGrid(year, month, day);
+      const completedCount = habits.filter(h => h.completedDates.includes(dateStr)).length;
+      const totalCount = habits.length;
+      const percentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+      
+      const dateObj = new Date(year, month, day);
+      const formattedDate = dateObj.toLocaleDateString(undefined, { 
+        weekday: 'short', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+
+      return {
+        day,
+        percentage,
+        completedCount,
+        totalCount,
+        formattedDate,
+        isToday: dateStr === todayStr,
+        isFuture: new Date(dateStr) > new Date(todayStr)
+      };
     });
+  }, [habits, year, month, daysCount, todayStr]);
 
-    return {
-      day,
-      percentage,
-      completedCount,
-      totalCount,
-      formattedDate,
-      isToday: dateStr === todayStr,
-      isFuture: new Date(dateStr) > new Date(todayStr)
-    };
-  });
+  const avgCompletion = useMemo(() => {
+    if (habits.length === 0) return 0;
+    const pastDays = daysData.filter(d => !d.isFuture);
+    if (pastDays.length === 0) return 0;
+    const sum = pastDays.reduce((acc, d) => acc + d.percentage, 0);
+    return Math.round(sum / pastDays.length);
+  }, [daysData, habits.length]);
 
-  const maxPercentage = 100;
-  const chartHeight = 120;
+  const bestDay = useMemo(() => {
+    return [...daysData].sort((a, b) => b.percentage - a.percentage)[0];
+  }, [daysData]);
+
+  const chartHeight = 100;
 
   return (
-    <div className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100 mt-12 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-200">
-      <div className="flex justify-between items-end mb-8">
+    <div className="bg-white rounded-[40px] p-8 md:p-10 border border-gray-100 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
         <div>
-          <h2 className="text-xl font-black text-gray-800 mb-1">Consistency Trend</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Daily success rate for this month</p>
+          <h2 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">Monthly Consistency</h2>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mt-1">Seasonal growth trend</p>
         </div>
-        <div className="text-right">
-          <span className="text-3xl font-black text-blue-600">
-            {habits.length > 0 
-              ? Math.round(daysData.reduce((acc, d) => acc + d.percentage, 0) / daysCount) 
-              : 0}%
-          </span>
-          <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Avg. Score</span>
+        
+        <div className="flex gap-4">
+          <div className="px-5 py-3 bg-bloom-50 rounded-2xl border border-bloom-100">
+            <span className="block text-[9px] font-black text-bloom-500 uppercase tracking-widest mb-1">Avg. Success</span>
+            <span className="text-xl font-black text-bloom-700">{avgCompletion}%</span>
+          </div>
+          <div className="px-5 py-3 bg-gray-50 rounded-2xl border border-gray-100">
+            <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Best Day</span>
+            <span className="text-xl font-black text-gray-900 uppercase">Day {bestDay?.day}</span>
+          </div>
         </div>
       </div>
 
-      <div className="relative h-[160px] flex items-end gap-1 sm:gap-2 px-2">
-        {/* Y-axis labels */}
-        <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] font-bold text-gray-300 pointer-events-none">
-          <span>100%</span>
-          <span>50%</span>
-          <span>0%</span>
+      <div className="relative h-[160px] flex items-end justify-between gap-1 px-1">
+        {/* Background Grid Lines */}
+        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pt-2">
+          <div className="w-full border-t border-gray-50"></div>
+          <div className="w-full border-t border-gray-50"></div>
+          <div className="w-full border-t border-gray-50"></div>
         </div>
 
-        {/* Grid lines */}
-        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none py-[2px] opacity-20">
-          <div className="w-full border-t border-dashed border-gray-300"></div>
-          <div className="w-full border-t border-dashed border-gray-300"></div>
-          <div className="w-full border-t border-dashed border-gray-300"></div>
-        </div>
-
-        {/* Bars */}
-        {daysData.map((data) => {
-          const barHeight = (data.percentage / maxPercentage) * chartHeight;
+        {daysData.map((data, idx) => {
+          const barHeight = (data.percentage / 100) * chartHeight;
+          const isActive = data.percentage > 0;
           
-          let barColor = 'bg-gray-100';
-          if (!data.isFuture) {
-            if (data.percentage >= 100) barColor = 'bg-green-400';
-            else if (data.percentage >= 50) barColor = 'bg-blue-400';
-            else if (data.percentage > 0) barColor = 'bg-orange-300';
-          }
-
           return (
-            <div 
-              key={data.day} 
-              className="flex-1 group relative flex flex-col items-center justify-end h-full"
-            >
-              {/* Enhanced Tooltip */}
-              <div className="absolute -top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white p-3 rounded-xl opacity-0 group-hover:opacity-100 transition-all z-10 whitespace-nowrap pointer-events-none shadow-xl scale-95 group-hover:scale-100 flex flex-col items-center gap-1 border border-gray-800">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">{data.formattedDate}</span>
-                <span className="text-sm font-black">{Math.round(data.percentage)}%</span>
-                <span className="text-[10px] font-medium text-gray-300 bg-white/10 px-2 py-0.5 rounded-full">
-                  {data.completedCount}/{data.totalCount} Habits
-                </span>
-                {/* Tooltip arrow */}
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45 border-r border-b border-gray-800"></div>
+            <div key={idx} className="flex-1 flex flex-col items-center group relative h-full justify-end">
+              {/* Tooltip */}
+              <div className="absolute -top-16 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all bg-gray-900 text-white text-[10px] font-black px-3 py-2 rounded-xl whitespace-nowrap z-20 shadow-xl pointer-events-none flex flex-col items-center gap-0.5">
+                <span className="text-gray-400 uppercase text-[8px]">{data.formattedDate}</span>
+                <span>{data.completedCount} / {data.totalCount} Rituals</span>
               </div>
 
+              {/* Bar */}
               <div 
-                className={`w-full rounded-t-md transition-all duration-500 ease-out hover:brightness-95 cursor-default ${barColor} ${data.isToday ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
-                style={{ height: `${Math.max(barHeight, 4)}px` }}
-              />
-              
-              <span className={`mt-2 text-[10px] font-bold ${data.isToday ? 'text-blue-500' : 'text-gray-300'}`}>
-                {data.day}
-              </span>
+                className={`w-full rounded-t-[4px] sm:rounded-t-lg transition-all duration-700 ease-out relative ${
+                  data.isToday 
+                    ? 'bg-bloom-500 shadow-lg shadow-bloom-500/20' 
+                    : !data.isFuture && isActive 
+                      ? 'bg-bloom-100 group-hover:bg-bloom-200' 
+                      : 'bg-gray-50'
+                }`}
+                style={{ height: `${Math.max(barHeight, 6)}px` }}
+              >
+                {data.percentage === 100 && !data.isFuture && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] hidden sm:block">✨</div>
+                )}
+              </div>
+
+              {/* Labels - Only show some labels on small screens to avoid crowding */}
+              <div className="mt-3">
+                <span className={`text-[8px] sm:text-[10px] font-bold ${data.isToday ? 'text-bloom-600' : 'text-gray-300'}`}>
+                  {data.day % (daysCount > 15 ? 5 : 1) === 0 || data.day === 1 || data.isToday ? data.day : ''}
+                </span>
+              </div>
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-10 pt-8 border-t border-gray-100 flex items-center gap-4">
+        <div className="w-10 h-10 bg-bloom-50 rounded-full flex items-center justify-center shrink-0">
+          <span className="text-lg">🗓️</span>
+        </div>
+        <p className="text-xs font-medium text-gray-500 leading-relaxed">
+          Your seasonal score is <span className="text-bloom-600 font-bold">{avgCompletion}%</span>. 
+          {avgCompletion >= 75 
+            ? " Your garden is in full bloom! This level of consistency is truly elite." 
+            : avgCompletion >= 40 
+              ? " You're nurturing steady growth. Focus on making your rituals non-negotiable." 
+              : " Every season starts with a single seed. Keep showing up for yourself."}
+        </p>
       </div>
     </div>
   );

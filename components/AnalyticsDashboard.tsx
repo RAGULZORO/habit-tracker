@@ -1,223 +1,225 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Habit } from '../types.ts';
-import { getDaysInMonth, formatDateForGrid, getTodayDateString } from '../utils.ts';
-import HabitAudit from './HabitAudit.tsx';
-import SummaryReport from './SummaryReport.tsx';
-import YearlyPlantReport from './YearlyPlantReport.tsx';
+import { GoogleGenAI } from "@google/genai";
 
 interface AnalyticsDashboardProps {
   habits: Habit[];
   currentDate: Date;
-  onDeleteAll: () => void;
-  profileCreatedAt?: string;
 }
 
-const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ habits, currentDate, onDeleteAll, profileCreatedAt }) => {
-  const [reportType, setReportType] = useState<'weekly' | 'monthly'>('monthly');
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const daysInMonth = getDaysInMonth(year, month);
-  const todayStr = getTodayDateString();
-  const monthName = currentDate.toLocaleString('default', { month: 'long' });
-  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ habits, currentDate }) => {
+  const [aiInsights, setAiInsights] = useState<{ weekly: string; monthly: string }>({ 
+    weekly: "Your rhythm is finding its soil...", 
+    monthly: "Observing the seasonal growth..." 
+  });
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  // Current stats calculation
-  const totalPossible = habits.length * (reportType === 'monthly' ? daysInMonth : 7);
-  
-  const currentPeriodCompletions = habits.reduce((acc, h) => {
-    if (reportType === 'monthly') {
-      return acc + h.completedDates.filter(d => d.startsWith(monthPrefix)).length;
-    } else {
-      const last7 = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        return d.toISOString().split('T')[0];
+  // --- DATA CALCULATIONS ---
+
+  // Weekly data: 7 days ending at the view's current date
+  const weeklyData = useMemo(() => {
+    const days = [];
+    const anchor = new Date(currentDate);
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(anchor);
+      d.setDate(anchor.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const completions = habits.reduce((acc, h) => acc + (h.completedDates.includes(dateStr) ? 1 : 0), 0);
+      days.push({
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        dayNum: d.getDate(),
+        fullDate: dateStr,
+        count: completions,
+        percentage: habits.length > 0 ? (completions / habits.length) * 100 : 0
       });
-      return acc + h.completedDates.filter(d => last7.includes(d)).length;
     }
-  }, 0);
+    return days;
+  }, [habits, currentDate]);
 
-  const consistency = totalPossible > 0 ? Math.round((currentPeriodCompletions / totalPossible) * 100) : 0;
+  // Monthly data: 6 months ending at the view's current month
+  const monthlyData = useMemo(() => {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const monthIndex = d.getMonth() + 1;
+      const year = d.getFullYear();
+      const monthPrefix = `${year}-${String(monthIndex).padStart(2, '0')}`;
+      
+      let totalPotential = 0;
+      let actualCompletions = 0;
+      
+      const daysInMonth = new Date(year, monthIndex, 0).getDate();
+      
+      habits.forEach(h => {
+        const monthComps = h.completedDates.filter(date => date.startsWith(monthPrefix)).length;
+        actualCompletions += monthComps;
+        totalPotential += daysInMonth;
+      });
 
-  const heatmapDays = useMemo(() => {
-    return Array.from({ length: daysInMonth }, (_, i) => {
-      const day = i + 1;
-      const dateStr = formatDateForGrid(year, month, day);
-      const completedCount = habits.filter(h => h.completedDates.includes(dateStr)).length;
-      const intensity = habits.length > 0 ? completedCount / habits.length : 0;
-      return { day, dateStr, intensity, completedCount };
-    });
-  }, [habits, daysInMonth, year, month]);
+      months.push({
+        label: d.toLocaleString('default', { month: 'short' }),
+        year: year,
+        percentage: totalPotential > 0 ? (actualCompletions / totalPotential) * 100 : 0,
+        count: actualCompletions
+      });
+    }
+    return months;
+  }, [habits, currentDate]);
 
-  const ambientPath = useMemo(() => {
-    if (heatmapDays.length === 0) return "";
-    const width = 1000;
-    const height = 150;
-    const padding = 20;
-    const step = (width - padding * 2) / (daysInMonth - 1);
-    let pathData = "";
-    let isDrawing = false;
-    heatmapDays.forEach((data, i) => {
-      const x = padding + i * step;
-      const y = height - padding - (data.intensity * (height - padding * 2));
-      if (data.intensity > 0) {
-        if (!isDrawing) {
-          pathData += `M ${x} ${y}`;
-          isDrawing = true;
-        } else {
-          const prevX = padding + (i - 1) * step;
-          const prevY = height - padding - (heatmapDays[i-1].intensity * (height - padding * 2));
-          const cpX = (prevX + x) / 2;
-          pathData += ` C ${cpX} ${prevY}, ${cpX} ${y}, ${x} ${y}`;
-        }
-      } else { isDrawing = false; }
-    });
-    return pathData;
-  }, [heatmapDays, daysInMonth]);
+  // --- AI INSIGHT GENERATION ---
+
+  const generateInsights = async () => {
+    if (habits.length === 0 || isGenerating) return;
+    setIsGenerating(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const weekSummary = weeklyData.map(d => `${d.label}: ${d.count}/${habits.length}`).join(', ');
+      const monthSummary = monthlyData.map(m => `${m.label}: ${Math.round(m.percentage)}%`).join(', ');
+
+      const prompt = `Analyze this habit data for the "Bloom" app.
+      Weekly Context: ${weekSummary}
+      Monthly Trends: ${monthSummary}
+      
+      Provide two very short, professional, and encouraging insights (max 12 words each):
+      1. One for the weekly rhythm.
+      2. One for the monthly velocity.
+      
+      Return as JSON: {"weekly": "...", "monthly": "..."}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+
+      const result = JSON.parse(response.text || '{}');
+      setAiInsights({
+        weekly: result.weekly || aiInsights.weekly,
+        monthly: result.monthly || aiInsights.monthly
+      });
+    } catch (e) {
+      console.error("AI Insight error:", e);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(generateInsights, 2000);
+    return () => clearTimeout(timer);
+  }, [habits, currentDate]);
+
+  const peakWeekDay = [...weeklyData].sort((a, b) => b.count - a.count)[0];
+  const peakMonth = [...monthlyData].sort((a, b) => b.percentage - a.percentage)[0];
 
   return (
-    <div className="mt-12 md:mt-24 space-y-12 md:space-y-24 animate-in fade-in duration-1000 pb-12">
-      {/* Section Header */}
-      <div className="flex flex-col md:flex-row justify-between items-center text-center md:text-left gap-6 px-4">
-        <div className="flex flex-col md:flex-row items-center gap-4">
-          <div className="w-12 h-12 md:w-14 md:h-14 bg-bloom-500 rounded-[20px] md:rounded-[28px] flex items-center justify-center text-white shadow-xl shadow-bloom-500/20">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 md:h-7 md:w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="text-2xl md:text-4xl font-black text-gray-900 tracking-tight">Ritual Growth</h2>
-            <p className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-[0.3em] mt-1">Deep Dive Analytics</p>
-          </div>
+    <div className="space-y-16 animate-in fade-in duration-700 pb-20">
+      <div className="flex flex-col md:flex-row md:items-end justify-between px-4 gap-4">
+        <div>
+          <h2 className="text-4xl font-black text-gray-900 tracking-tighter lowercase">Performance Reports.</h2>
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mt-2">Visualizing your discipline over time</p>
         </div>
-
-        <div className="flex bg-gray-50 p-1 rounded-2xl border border-gray-100 w-full md:w-auto overflow-hidden">
-          <button 
-            onClick={() => setReportType('weekly')}
-            className={`flex-1 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${reportType === 'weekly' ? 'bg-white shadow-sm text-bloom-600' : 'text-gray-400'}`}
-          >
-            Weekly
-          </button>
-          <button 
-            onClick={() => setReportType('monthly')}
-            className={`flex-1 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${reportType === 'monthly' ? 'bg-white shadow-sm text-bloom-600' : 'text-gray-400'}`}
-          >
-            Monthly
-          </button>
-        </div>
+        <button 
+          onClick={generateInsights}
+          className="flex items-center gap-2 px-6 py-3 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all group w-fit"
+        >
+          <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Refresh Insights</span>
+          <svg className={`w-4 h-4 text-bloom-500 ${isGenerating ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
       </div>
 
-      <div className="space-y-12 md:space-y-20 px-4">
-        {/* Consistency Recap Card */}
-        <div className="bg-white rounded-[32px] md:rounded-[40px] p-6 md:p-12 border border-gray-100 shadow-sm overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 md:mb-12 gap-4">
-            <div className="text-center md:text-left">
-              <h3 className="text-2xl md:text-5xl font-black text-gray-900 tracking-tighter lowercase">
-                {reportType === 'monthly' ? `${monthName} Flow` : 'Weekly Flow'}
-              </h3>
-              <p className="text-[10px] font-black text-bloom-500 uppercase tracking-widest mt-1">Consistency Trend</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 px-4">
+        
+        {/* WEEKLY RHYTHM BAR CHART */}
+        <div className="bg-white rounded-[48px] p-8 md:p-12 border border-gray-100 shadow-sm transition-all hover:border-bloom-100">
+          <div className="flex justify-between items-start mb-12">
+            <div>
+              <span className="text-[9px] font-black text-bloom-500 uppercase tracking-[0.4em] mb-2 block">7-Day Rhythm</span>
+              <h3 className="text-3xl font-black text-gray-900 tracking-tight lowercase">Daily Flow.</h3>
             </div>
-            <div className="flex flex-col items-center md:items-end">
-              <span className={`text-5xl md:text-7xl font-black tracking-tighter leading-none ${consistency > 70 ? 'text-gray-900' : 'text-red-500'}`}>
-                {consistency}%
-              </span>
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Efficiency</span>
+            <div className="text-right">
+              <span className="text-xs font-black text-gray-300 uppercase block">Peak</span>
+              <span className="text-2xl font-black text-orange-500 uppercase tracking-tighter">{peakWeekDay?.label}</span>
             </div>
           </div>
 
-          <div className="relative h-[100px] md:h-[200px] w-full flex items-center bg-gray-50/50 rounded-[24px] md:rounded-[32px] p-3 md:p-6 border border-gray-100 overflow-hidden">
-            <svg viewBox="0 0 1000 150" className="w-full h-full overflow-visible" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#80b918" stopOpacity="0" />
-                  <stop offset="50%" stopColor="#80b918" stopOpacity="1" />
-                  <stop offset="100%" stopColor="#80b918" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={ambientPath} fill="none" stroke="url(#lineGradient)" strokeWidth="6" strokeLinecap="round" className="transition-all duration-1000" />
-              {heatmapDays.map((data, i) => {
-                const width = 1000;
-                const height = 150;
-                const padding = 20;
-                const step = (width - padding * 2) / (daysInMonth - 1);
-                const x = padding + i * step;
-                const y = height - padding - (data.intensity * (height - padding * 2));
-                const isToday = data.dateStr === todayStr;
-                if (data.intensity <= 0) return null;
-                return (
-                  <circle key={data.day} cx={x} cy={y} r={isToday ? "10" : "5"} className={`${isToday ? 'fill-bloom-600' : 'fill-bloom-400 opacity-30'}`} />
-                );
-              })}
-            </svg>
-          </div>
-        </div>
-
-        {/* Actionable Report */}
-        <div className="transform transition-all">
-          <SummaryReport 
-            habits={habits} 
-            periodType={reportType} 
-            periodName={reportType === 'monthly' ? monthName : 'Current Week'} 
-          />
-        </div>
-
-        {/* Yearly Legacy Section - New Feature */}
-        <div className="pt-8">
-           <div className="flex items-center gap-3 mb-8 px-2">
-              <div className="w-1.5 h-6 bg-gray-900 rounded-full" />
-              <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">Annual Legacy</h3>
-           </div>
-           <YearlyPlantReport habits={habits} profileCreatedAt={profileCreatedAt} />
-        </div>
-
-        {/* AI Audit */}
-        <HabitAudit habits={habits} />
-
-        {/* Heatmap Grid Section */}
-        <div className="bg-white rounded-[32px] md:rounded-[40px] p-6 md:p-12 border border-gray-100 shadow-sm flex flex-col xl:flex-row justify-between gap-10">
-          <div className="xl:max-w-sm text-center xl:text-left">
-            <h3 className="text-xl md:text-3xl font-black text-gray-900 uppercase tracking-tighter mb-3 md:mb-4">Bloom Density</h3>
-            <p className="text-xs md:text-base text-gray-500 font-medium leading-relaxed mb-6 md:mb-8">Your total ritual intensity visualised across the garden calendar.</p>
-            <div className="flex items-center justify-center xl:justify-start gap-3 bg-gray-50 px-4 py-3 rounded-full w-fit mx-auto xl:mx-0 border border-gray-100">
-              <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Less</span>
-              <div className="flex gap-1">
-                {[1,2,3,4,5].map(i => <div key={i} className={`w-3.5 h-3.5 md:w-4 md:h-4 rounded-md ${['bg-gray-100', 'bg-bloom-100', 'bg-bloom-300', 'bg-bloom-500', 'bg-bloom-800'][i-1]}`} />)}
+          <div className="flex items-end justify-between gap-2 md:gap-4 h-56 mb-12">
+            {weeklyData.map((day, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-4 group">
+                <div className="w-full relative flex items-end justify-center h-full">
+                  <div 
+                    className={`w-full max-w-[40px] rounded-2xl transition-all duration-1000 ease-out shadow-sm ${
+                      day.count === peakWeekDay.count && day.count > 0 ? 'bg-bloom-500' : 'bg-bloom-50 group-hover:bg-bloom-100'
+                    }`}
+                    style={{ height: `${Math.max(day.percentage, 10)}%` }}
+                  >
+                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all bg-gray-900 text-white text-[10px] font-black px-3 py-1.5 rounded-xl whitespace-nowrap z-10 shadow-xl">
+                      {day.count} Rituals
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">{day.label}</span>
+                  <span className="text-[9px] font-bold text-gray-200">{day.dayNum}</span>
+                </div>
               </div>
-              <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">More</span>
-            </div>
+            ))}
           </div>
-          
-          <div className="flex-1 flex items-center justify-center">
-            <div className="grid grid-cols-7 gap-1.5 md:gap-3 p-4 md:p-6 bg-gray-50/50 rounded-[28px] md:rounded-[32px] border border-gray-100 w-full md:w-auto max-w-sm md:max-w-md">
-              {heatmapDays.map((data) => {
-                const isToday = data.dateStr === todayStr;
-                let intensityClass = 'bg-gray-200/50'; 
-                if (data.intensity > 0) intensityClass = 'bg-bloom-100';
-                if (data.intensity > 0.4) intensityClass = 'bg-bloom-300';
-                if (data.intensity > 0.7) intensityClass = 'bg-bloom-500';
-                if (data.intensity === 1) intensityClass = 'bg-bloom-800';
-                return (
-                  <div key={data.day} className={`aspect-square rounded-md md:rounded-xl transition-all shadow-sm ${intensityClass} ${isToday ? 'ring-2 ring-bloom-500 ring-offset-2' : ''}`} />
-                );
-              })}
+
+          <div className="bg-gray-50/50 rounded-3xl p-6 border border-gray-100 flex items-start gap-4">
+            <span className="text-2xl">⚡</span>
+            <div>
+              <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Weekly Note</span>
+              <p className="text-xs font-bold text-gray-700 leading-relaxed italic">"{aiInsights.weekly}"</p>
             </div>
           </div>
         </div>
 
-        {/* Maintenance / Danger Zone */}
-        <div className="bg-red-50/30 rounded-[32px] md:rounded-[40px] p-6 md:p-12 border border-red-100/40">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8 text-center md:text-left">
-            <div className="max-w-md">
-              <h3 className="text-lg md:text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">Garden Cleanse</h3>
-              <p className="text-xs md:text-sm text-gray-500 font-medium">Resetting your rituals will permanently clear all historical data from your profile.</p>
+        {/* MONTHLY VELOCITY BAR CHART */}
+        <div className="bg-white rounded-[48px] p-8 md:p-12 border border-gray-100 shadow-sm transition-all hover:border-bloom-100">
+          <div className="flex justify-between items-start mb-12">
+            <div>
+              <span className="text-[9px] font-black text-bloom-500 uppercase tracking-[0.4em] mb-2 block">6-Month Velocity</span>
+              <h3 className="text-3xl font-black text-gray-900 tracking-tight lowercase">Growth Trend.</h3>
             </div>
-            <button 
-              onClick={onDeleteAll}
-              className="w-full md:w-auto px-8 md:px-10 py-4 md:py-5 bg-white text-red-500 border-2 border-red-100 hover:bg-red-500 hover:text-white hover:border-red-500 rounded-[20px] md:rounded-[24px] font-black uppercase tracking-widest text-[10px] md:text-xs transition-all active:scale-95 shadow-sm"
-            >
-              Clear Entire Garden
-            </button>
+            <div className="text-right">
+              <span className="text-xs font-black text-gray-300 uppercase block">Top</span>
+              <span className="text-2xl font-black text-bloom-600 uppercase tracking-tighter">{peakMonth?.label}</span>
+            </div>
+          </div>
+
+          <div className="flex items-end justify-between gap-2 md:gap-4 h-56 mb-12">
+            {monthlyData.map((month, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-4 group">
+                <div className="w-full relative flex items-end justify-center h-full">
+                  <div 
+                    className={`w-full max-w-[40px] rounded-2xl transition-all duration-1000 ease-out shadow-sm ${
+                      month.label === peakMonth.label && month.percentage > 0 ? 'bg-bloom-600' : 'bg-gray-100 group-hover:bg-gray-200'
+                    }`}
+                    style={{ height: `${Math.max(month.percentage, 10)}%` }}
+                  >
+                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all bg-gray-900 text-white text-[10px] font-black px-3 py-1.5 rounded-xl whitespace-nowrap z-10 shadow-xl">
+                      {Math.round(month.percentage)}% Capacity
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{month.label}</span>
+                  <span className="text-[9px] font-bold text-gray-300">{month.year}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-50/50 rounded-3xl p-6 border border-gray-100 flex items-start gap-4">
+            <span className="text-2xl">🌱</span>
+            <div>
+              <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-1">Monthly Note</span>
+              <p className="text-xs font-bold text-gray-700 leading-relaxed italic">"{aiInsights.monthly}"</p>
+            </div>
           </div>
         </div>
       </div>

@@ -2,19 +2,17 @@
 export interface Habit {
   id: string;
   name: string;
-  goal: string;
+  goal: string; // Keep for descriptive text
   color: string;
-  completedDates: string[]; // ISO YYYY-MM-DD
+  completedDates: string[]; // Still used for boolean-only habits
   createdAt: string;
-  reminderTime?: string; // HH:mm format
-  reminderDays?: number[]; // [0-6] where 0 is Sunday
-}
-
-export interface DayProgress {
-  date: string;
-  dayName: string;
-  isToday: boolean;
-  isCompleted: boolean;
+  reminderTime?: string;
+  reminderDays?: number[];
+  
+  // New Measurable Goal fields
+  targetValue?: number;
+  unit?: string;
+  dailyLogs?: Record<string, number>; // dateStr -> current progress
 }
 
 export type StreakData = {
